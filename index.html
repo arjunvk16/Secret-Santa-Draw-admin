@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Santa Admin Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #1a1a1a; color: #e5e5e5; }
+    </style>
+</head>
+<body class="min-h-screen p-6">
+
+    <div class="max-w-2xl mx-auto">
+        <header class="flex justify-between items-center mb-8 border-b border-gray-700 pb-4">
+            <h1 class="text-2xl font-bold text-red-500">🎅 Admin Control</h1>
+            <div id="game-status" class="text-sm font-mono px-3 py-1 rounded bg-gray-800 text-gray-400">
+                Checking status...
+            </div>
+        </header>
+
+        <div class="bg-red-900/20 border border-red-500/30 rounded-lg p-6 mb-8">
+            <h2 class="text-xl font-bold text-red-400 mb-2">Danger Zone</h2>
+            <p class="text-gray-400 text-sm mb-4">
+                Clicking this will stop the current game and send everyone back to the selection screen. 
+                Existing assignments will be overwritten when a new game starts.
+            </p>
+            <button id="reset-all-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition w-full sm:w-auto">
+                ⚠️ HARD RESET GAME
+            </button>
+        </div>
+
+        <div class="bg-gray-800 rounded-lg p-6 shadow-xl">
+            <h2 class="text-xl font-bold text-white mb-4">Player Management</h2>
+            <p class="text-gray-400 text-xs mb-4">
+                If someone selected the WRONG name, click "Undo" next to that name. 
+                This puts them back into the dropdown list.
+            </p>
+            
+            <div id="player-list" class="space-y-3">
+                <p class="text-center text-gray-500 py-4">Waiting for game data...</p>
+            </div>
+        </div>
+
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, doc, onSnapshot, updateDoc, arrayRemove, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // 1. Config (Must match index.html)
+        const firebaseConfig = {
+            apiKey: "AIzaSyAJ9K9fQ0ThMB7aXB6qNHr3_yLUdqJgnCM",
+            authDomain: "my-chain-reaction-game.firebaseapp.com",
+            projectId: "my-chain-reaction-game",
+            storageBucket: "my-chain-reaction-game.appspot.com",
+            messagingSenderId: "32751418407",
+            appId: "1:32751418407:web:ff8244007ef2b099d56202"
+        };
+
+        const APP_ID = 'santa_v3_vanish'; // MUST MATCH INDEX.HTML
+
+        // 2. Init
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        
+        const els = {
+            list: document.getElementById('player-list'),
+            status: document.getElementById('game-status'),
+            resetBtn: document.getElementById('reset-all-btn')
+        };
+
+        // 3. Listen to Game State
+        const gameRef = doc(db, 'artifacts', APP_ID, 'public', 'state');
+
+        onSnapshot(gameRef, (docSnap) => {
+            if (!docSnap.exists()) {
+                els.status.textContent = "NO GAME ACTIVE";
+                els.status.className = "text-sm font-mono px-3 py-1 rounded bg-gray-700 text-gray-400";
+                els.list.innerHTML = '<p class="text-gray-500 text-center">Game has not been started yet.</p>';
+                return;
+            }
+
+            const data = docSnap.data();
+            
+            // Update Status Badge
+            if (data.status === 'STARTED') {
+                els.status.textContent = "🟢 GAME LIVE";
+                els.status.className = "text-sm font-mono px-3 py-1 rounded bg-green-900 text-green-300 border border-green-700";
+            } else {
+                els.status.textContent = "⚪ SETUP MODE";
+                els.status.className = "text-sm font-mono px-3 py-1 rounded bg-gray-700 text-gray-300";
+            }
+
+            renderPlayers(data.participants || [], data.revealed || []);
+        });
+
+        // 4. Render Logic
+        function renderPlayers(participants, revealed) {
+            if (!participants.length) return;
+
+            els.list.innerHTML = '';
+            
+            // Sort: Revealed people first (so you can fix mistakes easily), then alphabetical
+            const sorted = [...participants].sort((a, b) => {
+                const aDone = revealed.includes(a);
+                const bDone = revealed.includes(b);
+                if (aDone === bDone) return a.localeCompare(b);
+                return aDone ? -1 : 1;
+            });
+
+            sorted.forEach(name => {
+                const isRevealed = revealed.includes(name);
+                
+                const row = document.createElement('div');
+                row.className = `flex justify-between items-center p-3 rounded border ${isRevealed ? 'bg-gray-700 border-gray-600' : 'bg-gray-800 border-gray-800'}`;
+                
+                // Status Text
+                let statusHtml = isRevealed 
+                    ? `<span class="text-green-400 text-sm font-bold flex items-center">✅ DONE</span>` 
+                    : `<span class="text-gray-500 text-sm">Waiting...</span>`;
+
+                // Action Button
+                let actionHtml = isRevealed 
+                    ? `<button class="undo-btn bg-yellow-600 hover:bg-yellow-500 text-white text-xs font-bold py-1 px-3 rounded" data-name="${name}">Undo</button>`
+                    : ``;
+
+                row.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <span class="text-lg ${isRevealed ? 'text-gray-300' : 'text-gray-500'}">${name}</span>
+                        ${statusHtml}
+                    </div>
+                    <div>${actionHtml}</div>
+                `;
+
+                els.list.appendChild(row);
+            });
+
+            // Add Event Listeners to dynamic buttons
+            document.querySelectorAll('.undo-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => undoReveal(e.target.dataset.name));
+            });
+        }
+
+        // 5. Actions
+        async function undoReveal(name) {
+            if (!confirm(`Confirm: Put "${name}" back into the dropdown list?`)) return;
+            
+            try {
+                await updateDoc(gameRef, {
+                    revealed: arrayRemove(name)
+                });
+                // Snapshot will auto-update UI
+            } catch (e) {
+                alert("Error: " + e.message);
+            }
+        }
+
+        els.resetBtn.addEventListener('click', async () => {
+            const code = prompt("Type 'RESET' to confirm wiping the game:");
+            if (code !== 'RESET') return;
+
+            try {
+                // Changing status to RESET forces index.html to reload to setup screen
+                await setDoc(gameRef, {
+                    status: 'RESET',
+                    participants: [], // Clear participants
+                    revealed: []
+                });
+                alert("Game has been reset.");
+            } catch (e) {
+                alert("Error: " + e.message);
+            }
+        });
+
+    </script>
+</body>
+</html>
